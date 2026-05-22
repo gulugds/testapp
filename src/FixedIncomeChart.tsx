@@ -3,11 +3,11 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
-import { Plus, X, TrendingUp, ChevronRight, Info } from "lucide-react";
+import { Plus, X, TrendingUp, ChevronRight, Info, SlidersHorizontal, ArrowUp } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SecurityType = "CRA" | "CRI" | "Debênture" | "LCI" | "LCA" | "CDB" | "NTN-B" | "NTN-F" | "LTN" | "LFT";
+type SecurityType = "CRA" | "CRI" | "Debênture" | "LCI" | "LCA" | "CDB" | "CDCA" | "NTN-B" | "NTN-F" | "LTN" | "LFT";
 type Indexer = "IPCA+" | "CDI+" | "%CDI" | "Prefixado" | "SELIC";
 type CreditType = "Privado" | "Público";
 type IrTreatment = "Isento" | "IR Regressivo";
@@ -29,6 +29,7 @@ interface Security {
   breakEvenMonth: number;
   purchaseYear: number;
   purchaseMonth: number; // 0-indexed (0 = janeiro)
+  shortLabel: string;
 }
 
 interface DataPoint {
@@ -53,6 +54,7 @@ const SECURITY_META: Record<SecurityType, {
   LCI:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito Imobiliário" },
   LCA:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito do Agronegócio" },
   CDB:       { credit: "Privado", defaultIndexer: "%CDI",      irTreatment: "IR Regressivo", defaultSpread: 110.0, defaultYield: 10.5,  defaultMaturity: 2030, description: "Certificado de Depósito Bancário" },
+  CDCA:      { credit: "Privado", defaultIndexer: "Prefixado", irTreatment: "Isento",        defaultSpread: 12.0,  defaultYield: 12.0,  defaultMaturity: 2034, description: "Certificado de Direitos Creditórios do Agronegócio" },
   "NTN-B":   { credit: "Público", defaultIndexer: "IPCA+",     irTreatment: "IR Regressivo", defaultSpread: 6.5,   defaultYield: 13.0,  defaultMaturity: 2045, description: "Tesouro IPCA+" },
   "NTN-F":   { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.5,  defaultYield: 13.5,  defaultMaturity: 2033, description: "Tesouro Prefixado c/ Juros Semestrais" },
   LTN:       { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.0,  defaultYield: 13.0,  defaultMaturity: 2029, description: "Tesouro Prefixado" },
@@ -75,7 +77,7 @@ const CYCLE_PRESETS: { label: string; scenario: CycleScenario; amplitude: number
   { label: "Estabilidade",           scenario: "neutro",     amplitude: 1.0, period: 4 },
 ];
 
-const SECURITY_TYPES: SecurityType[] = ["CRA", "CRI", "Debênture", "LCI", "LCA", "CDB", "NTN-B", "NTN-F", "LTN", "LFT"];
+const SECURITY_TYPES: SecurityType[] = ["CRA", "CRI", "Debênture", "LCI", "LCA", "CDB", "CDCA", "NTN-B", "NTN-F", "LTN", "LFT"];
 const INDEXER_OPTIONS: Indexer[] = ["IPCA+", "CDI+", "%CDI", "Prefixado", "SELIC"];
 const HORIZON_OPTIONS = [
   { value: "1", label: "1 Ano" }, { value: "2", label: "2 Anos" },
@@ -230,7 +232,7 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
     const purchaseMonth = parseInt(pmStr, 10) - 1; // 0-indexed
     const label = name.trim() || `${type} ${indexer} ${spread}% ${maturityYear}`;
     onAdd({
-      id: String(Date.now()), name: label, type,
+      id: String(Date.now()), name: label, shortLabel: `${type} ${maturityYear}`, type,
       creditType: meta.credit, indexer, spread, yieldInitial,
       cycleScenario, cycleAmplitude, cyclePeriodYears: cyclePeriod,
       irTreatment: meta.irTreatment, maturityYear, breakEvenMonth,
@@ -422,6 +424,14 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
   );
 };
 
+// ─── Rationale por título (exibido no rodapé do card) ────────────────────────
+
+const RATIONALE: Record<string, string> = {
+  "2": "NTN-B 2035 oferece duration intermediária (~7 anos) com taxa real de 6,80% a.a. acima da inflação — patamar historicamente elevado. Em ciclo de queda de juros, o ágio esperado pode superar 15% em 24 meses, além do carrego pelo IPCA+. Indicado para investidores que buscam proteção inflacionária com potencial de ganho de capital no médio prazo.",
+  "3": "LTN 2029 trava a taxa nominal de 13,5% a.a. no patamar mais alto dos últimos anos. Com Selic prevista para cair, o preço do papel sobe e o investidor captura tanto o carrego quanto o ágio. Duration mais curta (~3 anos) reduz a volatilidade — boa porta de entrada para quem quer prefixado sem excesso de risco.",
+  "4": "NTN-B 2055 é a aposta de maior convicção em queda estrutural de juros reais. Taxa real de 7,20% a.a. com duration longa (~20 anos): cada 1 pp de queda no yield gera ~20% de valorização do PU. Adequado para perfil arrojado com horizonte de 5+ anos e crença no ciclo de afrouxamento monetário.",
+};
+
 // ─── Security Card ────────────────────────────────────────────────────────────
 
 const SecurityCard: React.FC<{
@@ -461,7 +471,7 @@ const SecurityCard: React.FC<{
     : `${sec.indexer} ${sec.spread}%`;
 
   return (
-    <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden shadow-2xl">
+    <div id={`card-${sec.id}`} className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden shadow-2xl">
       {/* Header */}
       <div className="px-6 pt-5 pb-0">
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
@@ -546,7 +556,13 @@ const SecurityCard: React.FC<{
       </div>
 
       {/* Footer */}
-      <div className="px-6 py-3">
+      <div className="px-6 py-3 space-y-2">
+        {RATIONALE[sec.id] && (
+          <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg px-4 py-2.5">
+            <p className="text-[11px] text-yellow-400 font-bold mb-0.5 uppercase tracking-wide">Por que comprar agora?</p>
+            <p className="text-[11px] text-gray-300 leading-relaxed">{RATIONALE[sec.id]}</p>
+          </div>
+        )}
         <p className="text-[11px] text-gray-500 leading-relaxed">
           * Ret. Líquido considera {isExempt ? "isenção de IR (PF)" : "IR regressivo (22,5% → 15%)"}.
           Ágio/Deságio estimado por duração simplificada (±{sec.cycleAmplitude / 2} pp · ciclo {sec.cyclePeriodYears} anos).
@@ -557,47 +573,250 @@ const SecurityCard: React.FC<{
   );
 };
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── Navigation Panel ────────────────────────────────────────────────────────
 
-const DEFAULT_SECURITY: Security = {
-  id: "1",
-  name: "CRA SEARA IPCA+ 7,42% – venc. 2055",
-  type: "CRA",
-  creditType: "Privado",
-  indexer: "IPCA+",
-  spread: 7.42,
-  yieldInitial: 13.5,
-  cycleScenario: "pico",
-  cycleAmplitude: 3.5,
-  cyclePeriodYears: 4,
-  irTreatment: "Isento",
-  maturityYear: 2055,
-  breakEvenMonth: 32,
-  purchaseYear: 2025,
-  purchaseMonth: 1, // fevereiro (0-indexed)
+const NavigationPanel: React.FC<{
+  securities: Security[];
+  visible: Record<string, boolean>;
+  onToggle: (id: string) => void;
+  onGroup: (group: "all" | "private" | "public" | "none") => void;
+}> = ({ securities, visible, onToggle, onGroup }) => {
+  const privateSecs = securities.filter((s) => s.creditType === "Privado");
+  const publicSecs  = securities.filter((s) => s.creditType === "Público");
+  const allVisible  = securities.every((s) => visible[s.id]);
+  const noneVisible = securities.every((s) => !visible[s.id]);
+  const onlyPrivate = !allVisible && !noneVisible && privateSecs.every((s) => visible[s.id]) && publicSecs.every((s) => !visible[s.id]);
+  const onlyPublic  = !allVisible && !noneVisible && publicSecs.every((s) => visible[s.id])  && privateSecs.every((s) => !visible[s.id]);
+
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+
+  const handleChip = (sec: Security) => {
+    const wasHidden = !visible[sec.id];
+    onToggle(sec.id);
+    if (wasHidden) {
+      setTimeout(() => {
+        document.getElementById(`card-${sec.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 60);
+    }
+  };
+
+  const GROUP_BTNS = [
+    { key: "all"     as const, label: "Todos",      active: allVisible },
+    { key: "private" as const, label: "Portfólio",  active: onlyPrivate },
+    { key: "public"  as const, label: "Tesouro",    active: onlyPublic },
+    { key: "none"    as const, label: "Nenhum",     active: noneVisible },
+  ];
+
+  return (
+    <div className="sticky top-0 z-40 bg-gray-950/96 backdrop-blur-md border border-gray-800 rounded-xl shadow-2xl">
+      {/* Top row: group filters */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800/70">
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal size={13} className="text-gray-500" />
+          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Navegação rápida</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {GROUP_BTNS.map(({ key, label, active }) => (
+            <button key={key} onClick={() => onGroup(key)}
+              className={`text-[11px] px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                active ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <button onClick={scrollToTop}
+            className="ml-1 flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md font-semibold
+                       bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+          >
+            <ArrowUp size={11} /> Topo
+          </button>
+        </div>
+      </div>
+
+      {/* Chip rows */}
+      <div className="px-4 py-2.5 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider whitespace-nowrap w-16 shrink-0">Portfólio</span>
+          {privateSecs.map((sec) => (
+            <button key={sec.id} onClick={() => handleChip(sec)} title={sec.name}
+              className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full font-medium border transition-all ${
+                visible[sec.id]
+                  ? "bg-emerald-900/40 border-emerald-700/70 text-emerald-300 hover:bg-emerald-900/60"
+                  : "bg-gray-800/50 border-gray-700/50 text-gray-500 hover:text-gray-400 line-through"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${visible[sec.id] ? "bg-emerald-400" : "bg-gray-600"}`} />
+              {sec.shortLabel}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider whitespace-nowrap w-16 shrink-0">Tesouro</span>
+          {publicSecs.map((sec) => (
+            <button key={sec.id} onClick={() => handleChip(sec)} title={sec.name}
+              className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full font-medium border transition-all ${
+                visible[sec.id]
+                  ? "bg-yellow-900/40 border-yellow-700/70 text-yellow-300 hover:bg-yellow-900/60"
+                  : "bg-gray-800/50 border-gray-700/50 text-gray-500 hover:text-gray-400 line-through"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${visible[sec.id] ? "bg-yellow-400" : "bg-gray-600"}`} />
+              {sec.shortLabel}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 };
 
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+const DEFAULT_SECURITIES: Security[] = [
+  // ── Portfólio – Crédito Privado ──────────────────────────────────────────
+  {
+    id: "1",  shortLabel: "CRA Seara",
+    name: "CRA SEARA IPCA+ 7,42% – venc. 2055",
+    type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 7.42,
+    yieldInitial: 13.5, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2055, breakEvenMonth: 32,
+    purchaseYear: 2025, purchaseMonth: 1,
+  },
+  {
+    id: "10", shortLabel: "CRA Marfrig",
+    name: "CRA MARFRIG PRE 11,71% – venc. 2031",
+    type: "CRA", creditType: "Privado", indexer: "Prefixado", spread: 11.71,
+    yieldInitial: 11.71, cycleScenario: "queda_alta", cycleAmplitude: 2.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 18,
+    purchaseYear: 2024, purchaseMonth: 2,
+  },
+  {
+    id: "11", shortLabel: "DEB CTEEP",
+    name: "DEB ISA CTEEP IPCA+ 5,86% – venc. 2039",
+    type: "Debênture", creditType: "Privado", indexer: "IPCA+", spread: 5.86,
+    yieldInitial: 10.5, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2039, breakEvenMonth: 12,
+    purchaseYear: 2023, purchaseMonth: 7,
+  },
+  {
+    id: "12", shortLabel: "CRI Terracap",
+    name: "CRI TERRACAP CDI+ 1,75% – venc. 2031",
+    type: "CRI", creditType: "Privado", indexer: "CDI+", spread: 1.75,
+    yieldInitial: 12.25, cycleScenario: "vale", cycleAmplitude: 1.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 6,
+    purchaseYear: 2024, purchaseMonth: 4,
+  },
+  {
+    id: "13", shortLabel: "CRA SLC",
+    name: "CRA SLC AGRÍCOLA IPCA+ 6,74% – venc. 2031",
+    type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 6.74,
+    yieldInitial: 11.24, cycleScenario: "vale", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 22,
+    purchaseYear: 2024, purchaseMonth: 6,
+  },
+  {
+    id: "14", shortLabel: "CDCA BTG",
+    name: "CDCA BTG PACTUAL PRE 12,03% – venc. 2034",
+    type: "CDCA", creditType: "Privado", indexer: "Prefixado", spread: 12.03,
+    yieldInitial: 12.03, cycleScenario: "vale", cycleAmplitude: 2.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2034, breakEvenMonth: 24,
+    purchaseYear: 2024, purchaseMonth: 7,
+  },
+  {
+    id: "15", shortLabel: "CRI Mateus",
+    name: "CRI MATEUS SUPERMERCADOS IPCA+ 6,9% – venc. 2039",
+    type: "CRI", creditType: "Privado", indexer: "IPCA+", spread: 6.9,
+    yieldInitial: 11.4, cycleScenario: "alta_queda", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2039, breakEvenMonth: 36,
+    purchaseYear: 2024, purchaseMonth: 10,
+  },
+  {
+    id: "16", shortLabel: "LCA ABC Brasil",
+    name: "LCA ABCBRASILBM IPCA+ 7,76% – venc. 2026",
+    type: "LCA", creditType: "Privado", indexer: "IPCA+", spread: 7.76,
+    yieldInitial: 13.26, cycleScenario: "pico", cycleAmplitude: 1.0, cyclePeriodYears: 4,
+    irTreatment: "Isento", maturityYear: 2026, breakEvenMonth: 3,
+    purchaseYear: 2025, purchaseMonth: 8,
+  },
+  // ── Sugestões – Crédito Público (Tesouro Direto) ─────────────────────────
+  {
+    id: "2",  shortLabel: "NTN-B 2035",
+    name: "Tesouro IPCA+ 2035 (NTN-B)",
+    type: "NTN-B", creditType: "Público", indexer: "IPCA+", spread: 6.80,
+    yieldInitial: 13.30, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "IR Regressivo", maturityYear: 2035, breakEvenMonth: 20,
+    purchaseYear: 2026, purchaseMonth: 4,
+  },
+  {
+    id: "3",  shortLabel: "LTN 2029",
+    name: "Tesouro Prefixado 2029 (LTN)",
+    type: "LTN", creditType: "Público", indexer: "Prefixado", spread: 13.50,
+    yieldInitial: 13.50, cycleScenario: "pico", cycleAmplitude: 2.5, cyclePeriodYears: 4,
+    irTreatment: "IR Regressivo", maturityYear: 2029, breakEvenMonth: 8,
+    purchaseYear: 2026, purchaseMonth: 4,
+  },
+  {
+    id: "4",  shortLabel: "NTN-B 2055",
+    name: "Tesouro IPCA+ 2055 (NTN-B Longo)",
+    type: "NTN-B", creditType: "Público", indexer: "IPCA+", spread: 7.20,
+    yieldInitial: 13.70, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    irTreatment: "IR Regressivo", maturityYear: 2055, breakEvenMonth: 42,
+    purchaseYear: 2026, purchaseMonth: 4,
+  },
+];
+
+const DEFAULT_HORIZONS: Record<string, string> = {
+  "1": "10", "10": "10", "11": "10", "12": "10",
+  "13": "10", "14": "10", "15": "10", "16": "2",
+  "2": "10", "3": "5", "4": "20",
+};
+const DEFAULT_ZOOMS: Record<string, boolean> = Object.fromEntries(
+  DEFAULT_SECURITIES.map((s) => [s.id, false])
+);
+
 const FixedIncomeApp: React.FC = () => {
-  const [securities, setSecurities] = useState<Security[]>([DEFAULT_SECURITY]);
-  const [horizons, setHorizons] = useState<Record<string, string>>({ "1": "10" });
-  const [zooms, setZooms] = useState<Record<string, boolean>>({ "1": false });
+  const [securities, setSecurities] = useState<Security[]>(DEFAULT_SECURITIES);
+  const [horizons,   setHorizons]   = useState<Record<string, string>>(DEFAULT_HORIZONS);
+  const [zooms,      setZooms]      = useState<Record<string, boolean>>(DEFAULT_ZOOMS);
+  const [visible,    setVisible]    = useState<Record<string, boolean>>(
+    Object.fromEntries(DEFAULT_SECURITIES.map((s) => [s.id, true]))
+  );
   const [showModal, setShowModal] = useState(false);
 
   const handleAdd = (sec: Security) => {
     setSecurities((prev) => [...prev, sec]);
-    setHorizons((prev) => ({ ...prev, [sec.id]: "10" }));
-    setZooms((prev) => ({ ...prev, [sec.id]: false }));
+    setHorizons((prev)   => ({ ...prev, [sec.id]: "10" }));
+    setZooms((prev)      => ({ ...prev, [sec.id]: false }));
+    setVisible((prev)    => ({ ...prev, [sec.id]: true }));
   };
 
   const handleRemove = (id: string) => {
     setSecurities((prev) => prev.filter((s) => s.id !== id));
-    setHorizons((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    setZooms((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    setHorizons((prev)   => { const n = { ...prev }; delete n[id]; return n; });
+    setZooms((prev)      => { const n = { ...prev }; delete n[id]; return n; });
+    setVisible((prev)    => { const n = { ...prev }; delete n[id]; return n; });
   };
+
+  const handleToggle = (id: string) =>
+    setVisible((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  const handleGroup = (group: "all" | "private" | "public" | "none") =>
+    setVisible(Object.fromEntries(
+      securities.map((s) => [s.id,
+        group === "all"     ? true :
+        group === "none"    ? false :
+        group === "private" ? s.creditType === "Privado" :
+                              s.creditType === "Público",
+      ])
+    ));
+
+  // Only render visible cards; track credit-type changes for separator
+  const visibleSecurities = securities.filter((s) => visible[s.id]);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-4 md:p-6 font-sans">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-4">
 
         {/* Page header */}
         <div className="flex items-center justify-between">
@@ -614,24 +833,60 @@ const FixedIncomeApp: React.FC = () => {
           </button>
         </div>
 
+        {/* Navigation panel */}
+        <NavigationPanel
+          securities={securities}
+          visible={visible}
+          onToggle={handleToggle}
+          onGroup={handleGroup}
+        />
+
         {/* Cards */}
-        {securities.map((sec) => (
-          <SecurityCard
-            key={sec.id}
-            security={sec}
-            horizon={horizons[sec.id] ?? "10"}
-            zoomBreakEven={zooms[sec.id] ?? false}
-            onHorizonChange={(v) => setHorizons((prev) => ({ ...prev, [sec.id]: v }))}
-            onZoomChange={(v) => setZooms((prev) => ({ ...prev, [sec.id]: v }))}
-            onRemove={() => handleRemove(sec.id)}
-          />
-        ))}
+        {(() => {
+          let lastCreditType: string | null = null;
+          return visibleSecurities.map((sec) => {
+            const showDivider = lastCreditType !== null && lastCreditType !== sec.creditType;
+            lastCreditType = sec.creditType;
+            return (
+              <React.Fragment key={sec.id}>
+                {showDivider && (
+                  <div className="flex items-center gap-4 py-1">
+                    <div className="flex-1 h-px bg-gray-800" />
+                    <span className="text-xs font-bold text-yellow-500 uppercase tracking-widest flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block" />
+                      Sugestões — Crédito Público (Tesouro Direto)
+                      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block" />
+                    </span>
+                    <div className="flex-1 h-px bg-gray-800" />
+                  </div>
+                )}
+                <SecurityCard
+                  security={sec}
+                  horizon={horizons[sec.id] ?? "10"}
+                  zoomBreakEven={zooms[sec.id] ?? false}
+                  onHorizonChange={(v) => setHorizons((prev) => ({ ...prev, [sec.id]: v }))}
+                  onZoomChange={(v)    => setZooms((prev)    => ({ ...prev, [sec.id]: v }))}
+                  onRemove={() => handleRemove(sec.id)}
+                />
+              </React.Fragment>
+            );
+          });
+        })()}
+
+        {/* All hidden state */}
+        {visibleSecurities.length === 0 && securities.length > 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+            <TrendingUp size={48} className="mb-4 opacity-20" />
+            <p className="text-base font-medium">Todos os gráficos estão ocultos.</p>
+            <p className="text-sm mt-1 text-gray-700">Use o painel acima para selecionar quais exibir.</p>
+          </div>
+        )}
 
         {/* Empty state */}
         {securities.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-28 text-gray-600">
-            <TrendingUp size={52} className="mb-4 opacity-25" />
-            <p className="text-lg font-medium">Nenhum título adicionado.</p>
+          <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+            <TrendingUp size={48} className="mb-4 opacity-20" />
+            <p className="text-base font-medium">Nenhum título adicionado.</p>
             <p className="text-sm mt-1 text-gray-700">Clique em "Adicionar Título" para começar.</p>
           </div>
         )}
