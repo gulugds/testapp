@@ -30,6 +30,10 @@ interface Security {
   purchaseYear: number;
   purchaseMonth: number; // 0-indexed (0 = janeiro)
   shortLabel: string;
+  /** Spread de liquidez do mercado secundário (% a.a.).
+   *  Custo adicional exigido pelo comprador na venda antecipada.
+   *  0% para Tesouro Direto (mercado-maker); 0,5–1,5% para crédito privado. */
+  liquiditySpread: number;
 }
 
 interface DataPoint {
@@ -46,19 +50,21 @@ interface DataPoint {
 
 const SECURITY_META: Record<SecurityType, {
   credit: CreditType; defaultIndexer: Indexer; irTreatment: IrTreatment;
-  defaultSpread: number; defaultYield: number; defaultMaturity: number; description: string;
+  defaultSpread: number; defaultYield: number; defaultMaturity: number;
+  description: string; defaultLiquiditySpread: number;
 }> = {
-  CRA:       { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "Isento",        defaultSpread: 7.42,  defaultYield: 13.5,  defaultMaturity: 2055, description: "Certificado de Recebíveis do Agronegócio" },
-  CRI:       { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "Isento",        defaultSpread: 7.0,   defaultYield: 13.2,  defaultMaturity: 2040, description: "Certificado de Recebíveis Imobiliários" },
-  Debênture: { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "IR Regressivo", defaultSpread: 6.5,   defaultYield: 12.8,  defaultMaturity: 2035, description: "Debênture Corporativa" },
-  LCI:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito Imobiliário" },
-  LCA:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito do Agronegócio" },
-  CDB:       { credit: "Privado", defaultIndexer: "%CDI",      irTreatment: "IR Regressivo", defaultSpread: 110.0, defaultYield: 10.5,  defaultMaturity: 2030, description: "Certificado de Depósito Bancário" },
-  CDCA:      { credit: "Privado", defaultIndexer: "Prefixado", irTreatment: "Isento",        defaultSpread: 12.0,  defaultYield: 12.0,  defaultMaturity: 2034, description: "Certificado de Direitos Creditórios do Agronegócio" },
-  "NTN-B":   { credit: "Público", defaultIndexer: "IPCA+",     irTreatment: "IR Regressivo", defaultSpread: 6.5,   defaultYield: 13.0,  defaultMaturity: 2045, description: "Tesouro IPCA+" },
-  "NTN-F":   { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.5,  defaultYield: 13.5,  defaultMaturity: 2033, description: "Tesouro Prefixado c/ Juros Semestrais" },
-  LTN:       { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.0,  defaultYield: 13.0,  defaultMaturity: 2029, description: "Tesouro Prefixado" },
-  LFT:       { credit: "Público", defaultIndexer: "SELIC",     irTreatment: "IR Regressivo", defaultSpread: 0.12,  defaultYield: 13.75, defaultMaturity: 2029, description: "Tesouro Selic" },
+  //                                                                                        liquiditySpread: custo de saída no mercado secundário
+  CRA:       { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "Isento",        defaultSpread: 7.42,  defaultYield: 13.5,  defaultMaturity: 2055, description: "Certificado de Recebíveis do Agronegócio",           defaultLiquiditySpread: 0.75 },
+  CRI:       { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "Isento",        defaultSpread: 7.0,   defaultYield: 13.2,  defaultMaturity: 2040, description: "Certificado de Recebíveis Imobiliários",             defaultLiquiditySpread: 0.75 },
+  Debênture: { credit: "Privado", defaultIndexer: "IPCA+",     irTreatment: "IR Regressivo", defaultSpread: 6.5,   defaultYield: 12.8,  defaultMaturity: 2035, description: "Debênture Corporativa",                             defaultLiquiditySpread: 1.00 },
+  LCI:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito Imobiliário",                      defaultLiquiditySpread: 0.50 },
+  LCA:       { credit: "Privado", defaultIndexer: "CDI+",      irTreatment: "Isento",        defaultSpread: 0.0,   defaultYield: 10.5,  defaultMaturity: 2028, description: "Letra de Crédito do Agronegócio",                   defaultLiquiditySpread: 0.50 },
+  CDB:       { credit: "Privado", defaultIndexer: "%CDI",      irTreatment: "IR Regressivo", defaultSpread: 110.0, defaultYield: 10.5,  defaultMaturity: 2030, description: "Certificado de Depósito Bancário",                  defaultLiquiditySpread: 0.25 },
+  CDCA:      { credit: "Privado", defaultIndexer: "Prefixado", irTreatment: "Isento",        defaultSpread: 12.0,  defaultYield: 12.0,  defaultMaturity: 2034, description: "Certificado de Direitos Creditórios do Agronegócio", defaultLiquiditySpread: 0.75 },
+  "NTN-B":   { credit: "Público", defaultIndexer: "IPCA+",     irTreatment: "IR Regressivo", defaultSpread: 6.5,   defaultYield: 13.0,  defaultMaturity: 2045, description: "Tesouro IPCA+",                                    defaultLiquiditySpread: 0.00 },
+  "NTN-F":   { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.5,  defaultYield: 13.5,  defaultMaturity: 2033, description: "Tesouro Prefixado c/ Juros Semestrais",             defaultLiquiditySpread: 0.00 },
+  LTN:       { credit: "Público", defaultIndexer: "Prefixado", irTreatment: "IR Regressivo", defaultSpread: 13.0,  defaultYield: 13.0,  defaultMaturity: 2029, description: "Tesouro Prefixado",                                 defaultLiquiditySpread: 0.00 },
+  LFT:       { credit: "Público", defaultIndexer: "SELIC",     irTreatment: "IR Regressivo", defaultSpread: 0.12,  defaultYield: 13.75, defaultMaturity: 2029, description: "Tesouro Selic",                                    defaultLiquiditySpread: 0.00 },
 };
 
 const CYCLE_LABELS: Record<CycleScenario, string> = {
@@ -423,6 +429,7 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
   const [cyclePeriod, setCyclePeriod] = useState(4);
   const [maturityYear, setMaturityYear] = useState(2045);
   const [breakEvenMonth, setBreakEvenMonth] = useState(32);
+  const [liquiditySpread, setLiquiditySpread] = useState(0.75);
   const today = new Date();
   const [purchaseValue, setPurchaseValue] = useState(
     `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`
@@ -437,6 +444,7 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
     setSpread(m.defaultSpread);
     setYieldInitial(m.defaultYield);
     setMaturityYear(m.defaultMaturity);
+    setLiquiditySpread(m.defaultLiquiditySpread);
   };
 
   const applyPreset = (p: typeof CYCLE_PRESETS[0]) => {
@@ -455,7 +463,7 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
       creditType: meta.credit, indexer, spread, yieldInitial,
       cycleScenario, cycleAmplitude, cyclePeriodYears: cyclePeriod,
       irTreatment: meta.irTreatment, maturityYear, breakEvenMonth,
-      purchaseYear, purchaseMonth,
+      purchaseYear, purchaseMonth, liquiditySpread,
     });
     onClose();
   };
@@ -598,15 +606,29 @@ const AddSecurityModal: React.FC<{ onAdd: (sec: Security) => void; onClose: () =
             </div>
           </div>
 
-          {/* Break-even */}
-          <div>
-            <label className="block text-xs font-bold text-gray-400 mb-1.5 uppercase tracking-wider">
-              Break-even Estimado (mês · ≈ dia {breakEvenMonth * 30})
-            </label>
-            <input type="number" value={breakEvenMonth} step={1} min={1} max={600} onChange={(e) => setBreakEvenMonth(parseInt(e.target.value) || 1)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="text-[11px] text-gray-500 mt-1">Mês em que o retorno líquido MtM cruza zero (início de ágio)</p>
+          {/* Break-even + Liquidity spread row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-1.5 uppercase tracking-wider">
+                Break-even (mês · ≈ dia {breakEvenMonth * 30})
+              </label>
+              <input type="number" value={breakEvenMonth} step={1} min={1} max={600} onChange={(e) => setBreakEvenMonth(parseInt(e.target.value) || 1)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Mês em que o retorno MtM cruza zero</p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-1.5 uppercase tracking-wider">
+                Spread de Liquidez (% a.a.)
+              </label>
+              <input type="number" value={liquiditySpread} step={0.05} min={0} max={3.0}
+                onChange={(e) => setLiquiditySpread(parseFloat(e.target.value) || 0)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                {meta.credit === "Público" ? "0% (Tesouro Direto — mercado-maker)" : "Custo de saída no mercado secundário (bid-ask)"}
+              </p>
+            </div>
           </div>
 
           {/* Badges */}
@@ -727,13 +749,24 @@ const SecurityCard: React.FC<{
     const remainingYearsAtSell = Math.max(0, sec.maturityYear - peakDecimal);
     const sensitPerPP = (remainingYearsAtSell * 0.65).toFixed(1);
 
+    // ── Spread de liquidez (custo de saída no mercado secundário) ─────────────
+    // Fórmula: o comprador exige um yield adicional de liquiditySpread% a.a.
+    // Impacto no preço ≈ liquiditySpread × duration_residual × 0.65
+    // (mesma lógica da duration simplificada usada para o ágio)
+    const liquidityCost = parseFloat((sec.liquiditySpread * remainingYearsAtSell * 0.65).toFixed(2));
+    const agioLiquidado = parseFloat((peakPt.agioDesagio - liquidityCost).toFixed(2));
+    const retLiquidoLiquido = parseFloat((peakPt.retLiquido - liquidityCost).toFixed(2));
+
     return {
       type: "sell" as const,
       date: peakPt.date,
       month: m,
-      agio: peakPt.agioDesagio,
-      yieldAtPeak: peakPt.yieldMercado,
-      retLiquido: peakPt.retLiquido,
+      agio: peakPt.agioDesagio,          // ágio bruto (sem custo de liquidez)
+      agioLiquidado,                       // ágio líquido após spread de liquidez
+      liquidityCost,                       // custo de liquidez (% do PU)
+      yieldAtPeak: peakPt.yieldMercado,   // yield de mercado no ponto ótimo (MÍNIMO do ciclo)
+      retLiquido: peakPt.retLiquido,       // retorno bruto MtM
+      retLiquidoLiquido,                   // retorno líquido após custo de saída
       timeStr,
       remainingYearsAtSell: remainingYearsAtSell.toFixed(0),
       sensitPerPP,
@@ -764,7 +797,12 @@ const SecurityCard: React.FC<{
 
   const yLeftMax = Math.max(50, ...allData.map((d) => Math.ceil(Math.max(d.retLiquido, d.curvaTeórica, d.cdiAcumulado) / 10) * 10));
   const yRightMin = Math.min(-20, ...allData.map((d) => Math.floor(d.agioDesagio / 10) * 10));
-  const yRightMax = Math.max(20, ...allData.map((d) => Math.ceil(d.yieldMercado / 5) * 5));
+  // BUG FIX: include positive agioDesagio in yRightMax (previously only used yieldMercado,
+  // causing the ágio curve to be silently clipped when it exceeded yieldMercado range)
+  const yRightMax = Math.max(
+    20,
+    ...allData.map((d) => Math.ceil(Math.max(d.yieldMercado, d.agioDesagio, 0) / 5) * 5)
+  );
 
   const isPublic = sec.creditType === "Público";
   const isExempt = sec.irTreatment === "Isento";
@@ -812,8 +850,18 @@ const SecurityCard: React.FC<{
               <span>·</span>
               <span>Período <span className="text-purple-400 font-semibold">{sec.cyclePeriodYears} anos</span></span>
             </p>
-            <p className="text-sm font-semibold text-blue-400 mt-1">
-              Break-even MtM: Mês {sec.breakEvenMonth} (≈ Dia {sec.breakEvenMonth * 30})
+            <p className="text-sm font-semibold text-blue-400 mt-1 flex items-center gap-3 flex-wrap">
+              <span>Break-even MtM: Mês {sec.breakEvenMonth} (≈ Dia {sec.breakEvenMonth * 30})</span>
+              {sec.liquiditySpread > 0 && (
+                <span className="text-[11px] font-semibold text-orange-400 bg-orange-900/30 border border-orange-800/50 px-2 py-0.5 rounded">
+                  Liquidez: −{sec.liquiditySpread.toFixed(2)}% a.a.
+                </span>
+              )}
+              {sec.liquiditySpread === 0 && (
+                <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-900/30 border border-emerald-800/50 px-2 py-0.5 rounded">
+                  Alta Liquidez (0% spread)
+                </span>
+              )}
             </p>
           </div>
 
@@ -958,21 +1006,37 @@ const SecurityCard: React.FC<{
             }
             {sellAnalysis.type === "sell" && (() => {
               const s = sellAnalysis;
+              const hasLiquidityCost = s.liquidityCost > 0;
               return (
                 <>
                   <span className="text-amber-300 font-semibold">Ponto ótimo estimado: {s.date}</span>
-                  {" "}({s.timeStr}). Nessa data o yield de mercado simulado atinge{" "}
-                  <span className="text-purple-300 font-semibold">{s.yieldAtPeak.toFixed(2)}% a.a.</span>
-                  {" "}(mínimo do ciclo), gerando{" "}
-                  <span className="text-blue-300 font-semibold">Ágio de {s.agio.toFixed(1)}%</span>
-                  {" "}e Retorno Líquido MtM de{" "}
-                  <span className="text-green-400 font-semibold">{s.retLiquido.toFixed(1)}%</span>.
-                  {" "}Com ~{s.remainingYearsAtSell} anos restantes até o vencimento, a sensibilidade é de{" "}
-                  <span className="text-gray-200 font-semibold">~{s.sensitPerPP}% por 1 pp</span>
-                  {" "}de variação adicional na taxa.
+                  {" "}({s.timeStr}).{" "}
+                  {/* Relação inversa yield ↔ preço explicitada */}
+                  Nessa data o yield de mercado simulado atinge o{" "}
+                  <span className="text-purple-300 font-semibold">mínimo local de {s.yieldAtPeak.toFixed(2)}% a.a.</span>
+                  {" "}— quanto menor a taxa, maior o preço do título no mercado secundário (relação inversa). Isso gera:{" "}
+                  <span className="text-blue-300 font-semibold">Ágio bruto de {s.agio.toFixed(1)}%</span>
+                  {hasLiquidityCost && (
+                    <>
+                      {" "}(−{s.liquidityCost.toFixed(1)}% spread de liquidez da corretora ={" "}
+                      <span className="text-amber-200 font-semibold">Ágio líquido de {s.agioLiquidado.toFixed(1)}%</span>)
+                    </>
+                  )}
+                  {" "}e Retorno Líquido MtM{hasLiquidityCost ? " líquido" : ""} de{" "}
+                  <span className="text-green-400 font-semibold">
+                    {hasLiquidityCost ? s.retLiquidoLiquido.toFixed(1) : s.retLiquido.toFixed(1)}%
+                  </span>.
+                  {" "}Com ~{s.remainingYearsAtSell} anos restantes até o vencimento, cada 1 pp adicional de queda no yield gera mais{" "}
+                  <span className="text-gray-200 font-semibold">~{s.sensitPerPP}%</span>
+                  {" "}de valorização.
                   {s.nearHorizonEdge
                     ? " ⚠ O pico está próximo ao limite do horizonte — aumente o horizonte de análise para confirmar se o ágio ainda cresce."
-                    : " Após esse pico, o ágio recua conforme as taxas sobem novamente e/ou a duration se reduz com a proximidade do vencimento."}
+                    : " Após esse ponto, o ágio recua à medida que as taxas voltam a subir e/ou a duration se reduz com a aproximação do vencimento."}
+                  {hasLiquidityCost && (
+                    <span className="text-gray-500">
+                      {" "}· Spread de liquidez {sec.liquiditySpread.toFixed(2)}% a.a. aplicado (mercado secundário de crédito privado).
+                    </span>
+                  )}
                 </>
               );
             })()}
@@ -986,9 +1050,11 @@ const SecurityCard: React.FC<{
           </div>
         )}
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          * Ret. Líquido considera {isExempt ? "isenção de IR (PF)" : "IR regressivo (22,5% → 15%)"}.
-          Ágio/Deságio = duration simplificada (±{sec.cycleAmplitude / 2} pp · ciclo {sec.cyclePeriodYears} anos + queda estrutural IPCA+→10,5% / Prefixado→9,5%).
-          CDI base: Selic 13,75% a.a. · IPCA base: 4,5% a.a.
+          * Ret. Líquido: {isExempt ? "isento de IR (PF)" : "IR regressivo (22,5% → 15%)"}
+          {sec.liquiditySpread > 0 ? ` · spread de liquidez −${sec.liquiditySpread.toFixed(2)}% a.a. já descontado no retorno estimado de venda` : " · Tesouro Direto sem custo de liquidez"}.
+          {" "}Relação inversa: ↑ yield = ↓ preço (deságio) · ↓ yield = ↑ preço (ágio).
+          Ágio/Deságio ≈ −Δyield × duration_residual × 0,65.
+          CDI base: 13,75% · IPCA base: 4,5% · equilíbrio estrutural IPCA+→10,5% / Prefixado→9,5%.
         </p>
       </div>
     </div>
@@ -1103,7 +1169,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 7.42,
     yieldInitial: 13.5, cycleScenario: "alta_queda", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2055, breakEvenMonth: 32,
-    purchaseYear: 2025, purchaseMonth: 1,
+    purchaseYear: 2025, purchaseMonth: 1, liquiditySpread: 0.75,
   },
   {
     id: "10", shortLabel: "CRA Marfrig",
@@ -1111,7 +1177,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "CRA", creditType: "Privado", indexer: "Prefixado", spread: 11.71,
     yieldInitial: 11.71, cycleScenario: "queda_alta", cycleAmplitude: 2.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 18,
-    purchaseYear: 2024, purchaseMonth: 2,
+    purchaseYear: 2024, purchaseMonth: 2, liquiditySpread: 0.75,
   },
   {
     id: "11", shortLabel: "DEB CTEEP",
@@ -1119,7 +1185,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "Debênture", creditType: "Privado", indexer: "IPCA+", spread: 5.86,
     yieldInitial: 10.5, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2039, breakEvenMonth: 12,
-    purchaseYear: 2023, purchaseMonth: 7,
+    purchaseYear: 2023, purchaseMonth: 7, liquiditySpread: 1.00,
   },
   {
     id: "12", shortLabel: "CRI Terracap",
@@ -1127,26 +1193,23 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "CRI", creditType: "Privado", indexer: "CDI+", spread: 1.75,
     yieldInitial: 12.25, cycleScenario: "vale", cycleAmplitude: 1.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 6,
-    purchaseYear: 2024, purchaseMonth: 4,
+    purchaseYear: 2024, purchaseMonth: 4, liquiditySpread: 0.75,
   },
   {
     id: "13", shortLabel: "CRA SLC",
     name: "CRA SLC AGRÍCOLA IPCA+ 6,74% – venc. 2031",
     type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 6.74,
-    // Comprado no vale do ciclo (jul/2024, Selic 10,5%) → taxa subiu → agora em queda
-    // cycleScenario "alta_queda" (phaseOffset 3π/2): sobe até pico (T/4≈1 ano), cai até vale (3T/4≈3 anos)
     yieldInitial: 11.24, cycleScenario: "alta_queda", cycleAmplitude: 4.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 22,
-    purchaseYear: 2024, purchaseMonth: 6,
+    purchaseYear: 2024, purchaseMonth: 6, liquiditySpread: 0.75,
   },
   {
     id: "14", shortLabel: "CDCA BTG",
     name: "CDCA BTG PACTUAL PRE 12,03% – venc. 2034",
     type: "CDCA", creditType: "Privado", indexer: "Prefixado", spread: 12.03,
-    // Comprado no vale (ago/2024) → subiu com Selic → agora iniciando queda estrutural
     yieldInitial: 12.03, cycleScenario: "alta_queda", cycleAmplitude: 4.0, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2034, breakEvenMonth: 24,
-    purchaseYear: 2024, purchaseMonth: 7,
+    purchaseYear: 2024, purchaseMonth: 7, liquiditySpread: 0.75,
   },
   {
     id: "15", shortLabel: "CRI Mateus",
@@ -1154,7 +1217,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "CRI", creditType: "Privado", indexer: "IPCA+", spread: 6.9,
     yieldInitial: 11.4, cycleScenario: "alta_queda", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2039, breakEvenMonth: 36,
-    purchaseYear: 2024, purchaseMonth: 10,
+    purchaseYear: 2024, purchaseMonth: 10, liquiditySpread: 0.75,
   },
   {
     id: "16", shortLabel: "LCA ABC Brasil",
@@ -1162,7 +1225,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "LCA", creditType: "Privado", indexer: "IPCA+", spread: 7.76,
     yieldInitial: 13.26, cycleScenario: "pico", cycleAmplitude: 1.0, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2026, breakEvenMonth: 3,
-    purchaseYear: 2025, purchaseMonth: 8,
+    purchaseYear: 2025, purchaseMonth: 8, liquiditySpread: 0.50,
   },
   // ── Sugestões – Crédito Público (Tesouro Direto) ─────────────────────────
   {
@@ -1171,7 +1234,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "NTN-B", creditType: "Público", indexer: "IPCA+", spread: 6.80,
     yieldInitial: 13.30, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "IR Regressivo", maturityYear: 2035, breakEvenMonth: 20,
-    purchaseYear: 2026, purchaseMonth: 4,
+    purchaseYear: 2026, purchaseMonth: 4, liquiditySpread: 0.00,
   },
   {
     id: "3",  shortLabel: "LTN 2029",
@@ -1179,7 +1242,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "LTN", creditType: "Público", indexer: "Prefixado", spread: 13.50,
     yieldInitial: 13.50, cycleScenario: "pico", cycleAmplitude: 2.5, cyclePeriodYears: 4,
     irTreatment: "IR Regressivo", maturityYear: 2029, breakEvenMonth: 8,
-    purchaseYear: 2026, purchaseMonth: 4,
+    purchaseYear: 2026, purchaseMonth: 4, liquiditySpread: 0.00,
   },
   {
     id: "4",  shortLabel: "NTN-B 2055",
@@ -1187,7 +1250,7 @@ const DEFAULT_SECURITIES: Security[] = [
     type: "NTN-B", creditType: "Público", indexer: "IPCA+", spread: 7.20,
     yieldInitial: 13.70, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "IR Regressivo", maturityYear: 2055, breakEvenMonth: 42,
-    purchaseYear: 2026, purchaseMonth: 4,
+    purchaseYear: 2026, purchaseMonth: 4, liquiditySpread: 0.00,
   },
 ];
 
