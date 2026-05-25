@@ -622,6 +622,20 @@ const RATIONALE: Record<string, string> = {
   "4": "NTN-B 2055 é a aposta de maior convicção em queda estrutural de juros reais. Taxa real de 7,20% a.a. com duration longa (~20 anos): cada 1 pp de queda no yield gera ~20% de valorização do PU. Adequado para perfil arrojado com horizonte de 5+ anos e crença no ciclo de afrouxamento monetário.",
 };
 
+// ─── Line config (toggle) ────────────────────────────────────────────────────
+
+type LineKey = "retLiquido" | "curvaTeórica" | "yieldMercado" | "agioDesagio" | "cdiAcumulado";
+
+const LINE_CONFIG: {
+  key: LineKey; name: string; color: string; yAxisId: "left" | "right"; dasharray?: string;
+}[] = [
+  { key: "retLiquido",   name: "Ret. Líquido (MtM)",  color: "#22C55E", yAxisId: "left" },
+  { key: "curvaTeórica", name: "Curva Teórica",        color: "#F97316", yAxisId: "left",  dasharray: "7 4" },
+  { key: "yieldMercado", name: "Yield de Mercado",     color: "#C084FC", yAxisId: "right" },
+  { key: "agioDesagio",  name: "Ágio / Deságio",       color: "#60A5FA", yAxisId: "right" },
+  { key: "cdiAcumulado", name: "CDI Acumulado",        color: "#EF4444", yAxisId: "left" },
+];
+
 // ─── Security Card ────────────────────────────────────────────────────────────
 
 const SecurityCard: React.FC<{
@@ -633,6 +647,11 @@ const SecurityCard: React.FC<{
   onRemove: () => void;
 }> = ({ security: sec, horizon, zoomBreakEven, onHorizonChange, onZoomChange, onRemove }) => {
   const [showCycleChart, setShowCycleChart] = useState(false);
+  const [activeLines, setActiveLines] = useState<Record<LineKey, boolean>>({
+    retLiquido: true, "curvaTeórica": true, yieldMercado: true, agioDesagio: true, cdiAcumulado: true,
+  });
+  const toggleLine = (key: LineKey) => setActiveLines((p) => ({ ...p, [key]: !p[key] }));
+
   const horizonYears = parseInt(horizon, 10);
   const allData = useMemo(() => generateData(horizonYears, sec), [horizonYears, sec]);
 
@@ -643,6 +662,51 @@ const SecurityCard: React.FC<{
     return allData.slice(start, end + 1);
   }, [allData, zoomBreakEven, sec.breakEvenMonth]);
 
+  // ── Ideal sell analysis ──────────────────────────────────────────────────
+  const sellAnalysis = useMemo(() => {
+    const isCDILinked = sec.indexer === "CDI+" || sec.indexer === "%CDI" || sec.indexer === "SELIC";
+    if (isCDILinked) return { type: "cdi" as const };
+
+    const totalMonths = allData.length;
+    if (totalMonths < 18) return { type: "short" as const };
+
+    // Peak ágio in visible horizon
+    const peakPt = allData.reduce((best, d) => (d.agioDesagio > best.agioDesagio ? d : best), allData[0]);
+    if (peakPt.agioDesagio < 1.0) return { type: "no_agio" as const };
+
+    const m = peakPt.month;
+    const yrs = Math.floor(m / 12);
+    const mos = m % 12;
+    const timeStr = yrs > 0
+      ? `${yrs} ano${yrs > 1 ? "s" : ""}${mos > 0 ? ` e ${mos} meses` : ""}`
+      : `${mos} meses`;
+    // Approximate remaining duration at peak
+    const purchaseDecimal = sec.purchaseYear + sec.purchaseMonth / 12;
+    const peakDecimal = purchaseDecimal + m / 12;
+    const remainingYearsAtSell = Math.max(0, sec.maturityYear - peakDecimal);
+    const sensitPerPP = (remainingYearsAtSell * 0.65).toFixed(1);
+
+    return {
+      type: "sell" as const,
+      date: peakPt.date,
+      month: m,
+      agio: peakPt.agioDesagio,
+      yieldAtPeak: peakPt.yieldMercado,
+      retLiquido: peakPt.retLiquido,
+      timeStr,
+      remainingYearsAtSell: remainingYearsAtSell.toFixed(0),
+      sensitPerPP,
+      nearHorizonEdge: m >= allData.length - 3,
+    };
+  }, [allData, sec]);
+
+  const sellDateLabel = sellAnalysis.type === "sell" ? sellAnalysis.date : "";
+  const sellVisible = sellAnalysis.type === "sell" &&
+    chartData.length > 0 &&
+    sellAnalysis.month >= chartData[0].month &&
+    sellAnalysis.month <= chartData[chartData.length - 1].month;
+
+  // ─────────────────────────────────────────────────────────────────────────
   const breakEvenDate = allData[sec.breakEvenMonth]?.date ?? "";
   const breakEvenVisible = chartData.length > 0 &&
     sec.breakEvenMonth >= chartData[0].month &&
@@ -730,25 +794,82 @@ const SecurityCard: React.FC<{
       </div>
 
       {/* Chart */}
-      <div className="px-2 pt-3 pb-0">
-        <ResponsiveContainer width="100%" height={420}>
-          <LineChart data={chartData} margin={{ top: 24, right: 70, left: 8, bottom: 8 }}>
+      <div className="px-2 pt-2 pb-0">
+
+        {/* Line toggles */}
+        <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+          {LINE_CONFIG.map(({ key, name, color, dasharray }) => {
+            const on = activeLines[key];
+            return (
+              <button key={key} onClick={() => toggleLine(key)} title={on ? "Ocultar" : "Exibir"}
+                className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border font-medium transition-all select-none"
+                style={{
+                  borderColor: on ? color : "#374151",
+                  color:       on ? color : "#6B7280",
+                  background:  on ? `${color}1A` : "transparent",
+                  textDecoration: on ? "none" : "line-through",
+                  opacity: on ? 1 : 0.5,
+                }}
+              >
+                {/* Mini line preview */}
+                <svg width="18" height="8" style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }}>
+                  {dasharray
+                    ? <line x1="0" y1="4" x2="18" y2="4" stroke={on ? color : "#6B7280"} strokeWidth="2" strokeDasharray="4 2" />
+                    : <line x1="0" y1="4" x2="18" y2="4" stroke={on ? color : "#6B7280"} strokeWidth="2" />}
+                </svg>
+                {name}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => {
+              const allOn = LINE_CONFIG.every(l => activeLines[l.key]);
+              const next = allOn
+                ? Object.fromEntries(LINE_CONFIG.map(l => [l.key, false])) as Record<LineKey, boolean>
+                : Object.fromEntries(LINE_CONFIG.map(l => [l.key, true])) as Record<LineKey, boolean>;
+              setActiveLines(next);
+            }}
+            className="text-[11px] px-2.5 py-1 rounded-full border border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-all"
+          >
+            {LINE_CONFIG.every(l => activeLines[l.key]) ? "Ocultar todas" : "Exibir todas"}
+          </button>
+        </div>
+
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={chartData} margin={{ top: 8, right: 70, left: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.45} />
             <XAxis dataKey="date" tick={{ fill: "#9CA3AF", fontSize: 11 }} tickLine={{ stroke: "#4B5563" }} axisLine={{ stroke: "#4B5563" }} interval={tickInterval} />
             <YAxis yAxisId="left" domain={[-65, yLeftMax]} tickFormatter={(v: number) => `${v}%`} tick={{ fill: "#9CA3AF", fontSize: 11 }} tickLine={{ stroke: "#4B5563" }} axisLine={{ stroke: "#4B5563" }} width={58} />
             <YAxis yAxisId="right" orientation="right" domain={[yRightMin, yRightMax]} tickFormatter={(v: number) => `${v}%`} tick={{ fill: "#9CA3AF", fontSize: 11 }} tickLine={{ stroke: "#4B5563" }} axisLine={{ stroke: "#4B5563" }} width={60} />
             <Tooltip content={<CustomTooltip />} />
-            <Legend verticalAlign="top" wrapperStyle={{ paddingBottom: "14px", fontSize: "11px", color: "#D1D5DB" }} />
+
+            {/* Break-even */}
             {breakEvenVisible && (
               <ReferenceLine x={breakEvenDate} yAxisId="left" stroke="#3B82F6" strokeDasharray="5 4" strokeWidth={1.5}
                 label={{ value: `Break-even · Mês ${sec.breakEvenMonth}`, position: "insideTopRight", fill: "#3B82F6", fontSize: 10, fontWeight: 600, offset: 6 }}
               />
             )}
-            <Line yAxisId="left"  type="monotone" dataKey="retLiquido"  name="Ret. Líquido (MtM)"        stroke="#22C55E" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-            <Line yAxisId="left"  type="monotone" dataKey="curvaTeórica" name="Curva Teórica (bruto)"    stroke="#F97316" strokeWidth={2} strokeDasharray="7 4" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-            <Line yAxisId="right" type="monotone" dataKey="yieldMercado" name="Yield de Mercado (% a.a.)"stroke="#C084FC" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-            <Line yAxisId="right" type="monotone" dataKey="agioDesagio"  name="Ágio / Deságio (%)"       stroke="#60A5FA" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-            <Line yAxisId="left"  type="monotone" dataKey="cdiAcumulado" name="CDI Acumulado"             stroke="#EF4444" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+            {/* Ideal sell */}
+            {sellVisible && (
+              <ReferenceLine x={sellDateLabel} yAxisId="right" stroke="#FBBF24" strokeDasharray="5 3" strokeWidth={1.5}
+                label={{ value: `Venda ideal · Ágio máx.`, position: "insideTopLeft", fill: "#FBBF24", fontSize: 10, fontWeight: 600, offset: 6 }}
+              />
+            )}
+
+            {LINE_CONFIG.map(({ key, color, yAxisId, dasharray }) => (
+              <Line
+                key={key}
+                yAxisId={yAxisId}
+                type="monotone"
+                dataKey={key}
+                stroke={color}
+                strokeWidth={2}
+                strokeDasharray={dasharray}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0 }}
+                hide={!activeLines[key]}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -759,6 +880,51 @@ const SecurityCard: React.FC<{
 
       {/* Footer */}
       <div className="px-6 py-3 space-y-2">
+
+        {/* Ideal sell analysis */}
+        <div className={`rounded-lg px-4 py-2.5 border ${
+          sellAnalysis.type === "sell"
+            ? "bg-amber-950/30 border-amber-800/50"
+            : "bg-gray-800/40 border-gray-700/40"
+        }`}>
+          <p className="text-[11px] font-bold mb-0.5 uppercase tracking-wide flex items-center gap-1.5"
+            style={{ color: sellAnalysis.type === "sell" ? "#FBBF24" : "#9CA3AF" }}>
+            <TrendingUp size={11} />
+            Momento Ideal para Venda
+          </p>
+          <p className="text-[11px] text-gray-300 leading-relaxed">
+            {sellAnalysis.type === "cdi" &&
+              "Título pós-fixado (CDI/SELIC): duration próxima de zero — o PU oscila minimamente em relação ao par. Não há janela de ágio por ciclo de juros. A decisão de venda deve ser baseada em oportunidade de realocação, mudança de crédito do emissor ou necessidade de liquidez."
+            }
+            {sellAnalysis.type === "short" &&
+              "Prazo até o vencimento é reduzido — o impacto de duration é limitado. A diferença entre vender agora e carregar até o vencimento tende a ser pequena; avalie custo de transação e a alternativa disponível antes de decidir."
+            }
+            {sellAnalysis.type === "no_agio" &&
+              "No cenário de ciclo simulado, o título não apresenta ágio positivo relevante no horizonte analisado. Tente estender o horizonte ou ajustar o cenário de juros para um ciclo de queda mais acentuado."
+            }
+            {sellAnalysis.type === "sell" && (() => {
+              const s = sellAnalysis;
+              return (
+                <>
+                  <span className="text-amber-300 font-semibold">Ponto ótimo estimado: {s.date}</span>
+                  {" "}({s.timeStr} após a compra). Nessa data o yield de mercado simulado atinge{" "}
+                  <span className="text-purple-300 font-semibold">{s.yieldAtPeak.toFixed(2)}% a.a.</span>
+                  {" "}(mínimo do ciclo), gerando{" "}
+                  <span className="text-blue-300 font-semibold">Ágio de {s.agio.toFixed(1)}%</span>
+                  {" "}e Retorno Líquido MtM de{" "}
+                  <span className="text-green-400 font-semibold">{s.retLiquido.toFixed(1)}%</span>.
+                  {" "}Com ~{s.remainingYearsAtSell} anos restantes até o vencimento, a sensibilidade é de{" "}
+                  <span className="text-gray-200 font-semibold">~{s.sensitPerPP}% por 1 pp</span>
+                  {" "}de variação adicional na taxa.
+                  {s.nearHorizonEdge
+                    ? " ⚠ O pico está próximo ao limite do horizonte — aumente o horizonte de análise para confirmar se o ágio ainda cresce."
+                    : " Após esse pico, o ágio recua conforme as taxas sobem novamente e/ou a duration se reduz com a proximidade do vencimento."}
+                </>
+              );
+            })()}
+          </p>
+        </div>
+
         {RATIONALE[sec.id] && (
           <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg px-4 py-2.5">
             <p className="text-[11px] text-yellow-400 font-bold mb-0.5 uppercase tracking-wide">Por que comprar agora?</p>
