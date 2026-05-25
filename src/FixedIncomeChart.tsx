@@ -131,10 +131,12 @@ function generateData(horizonYears: number, sec: Security): DataPoint[] {
     const t = i / 12;
     const cyclePhase = (2 * Math.PI * t) / sec.cyclePeriodYears + phaseOffset;
 
-    const yieldMercado = sec.yieldInitial + (sec.cycleAmplitude / 2) * Math.cos(cyclePhase);
+    // Fix 1: yield starts exactly at yieldInitial at t=0 by subtracting the initial offset
+    const yieldMercado = sec.yieldInitial +
+      (sec.cycleAmplitude / 2) * (Math.cos(cyclePhase) - Math.cos(phaseOffset));
 
-    // Ágio/Deságio uses simplified duration effect
-    const remainingYears = Math.max(0.1, sec.maturityYear - 2026 - t);
+    // Fix 2: remaining years from purchase date, not hardcoded 2026
+    const remainingYears = Math.max(0.1, sec.maturityYear - sec.purchaseYear - sec.purchaseMonth / 12 - t);
     const yieldDelta = yieldMercado - sec.yieldInitial;
     const agioDesagio = parseFloat(
       Math.min(40, Math.max(-60, -yieldDelta * remainingYears * 0.65)).toFixed(2)
@@ -143,18 +145,15 @@ function generateData(horizonYears: number, sec: Security): DataPoint[] {
     const cdiAcumulado = (Math.pow(1 + CDI_RATE, t) - 1) * 100;
     const curvaTeórica = (Math.pow(1 + theoreticalRate, t) - 1) * 100;
 
-    // Net return with MtM effect
+    // Fix 3: use agioDesagio directly — no artificial decay hack
     let retLiquido: number;
     if (sec.irTreatment === "Isento") {
       const grossReturn = (Math.pow(1 + theoreticalRate, t) - 1) * 100;
-      const agioDecay = agioDesagio * Math.max(0, 1 - i / (sec.breakEvenMonth * 1.5));
-      retLiquido = grossReturn + agioDecay;
+      retLiquido = grossReturn + agioDesagio;
     } else {
       const irRate = getIRRate(i);
       const grossReturn = (Math.pow(1 + theoreticalRate, t) - 1) * 100;
-      const netReturn = grossReturn * (1 - irRate);
-      const agioDecay = agioDesagio * Math.max(0, 1 - i / (sec.breakEvenMonth * 1.5));
-      retLiquido = netReturn + agioDecay;
+      retLiquido = grossReturn * (1 - irRate) + agioDesagio;
     }
 
     return {
@@ -663,6 +662,11 @@ const SecurityCard: React.FC<{
   }, [allData, zoomBreakEven, sec.breakEvenMonth]);
 
   // ── Ideal sell analysis ──────────────────────────────────────────────────
+  // Fix 4: only search FUTURE months (from today = May/2026 = purchaseMonth offset)
+  const TODAY_YEAR = 2026;
+  const TODAY_MONTH = 4; // 0-indexed → May
+  const monthsToToday = Math.max(0, (TODAY_YEAR - sec.purchaseYear) * 12 + (TODAY_MONTH - sec.purchaseMonth));
+
   const sellAnalysis = useMemo(() => {
     const isCDILinked = sec.indexer === "CDI+" || sec.indexer === "%CDI" || sec.indexer === "SELIC";
     if (isCDILinked) return { type: "cdi" as const };
@@ -670,16 +674,23 @@ const SecurityCard: React.FC<{
     const totalMonths = allData.length;
     if (totalMonths < 18) return { type: "short" as const };
 
-    // Peak ágio in visible horizon
-    const peakPt = allData.reduce((best, d) => (d.agioDesagio > best.agioDesagio ? d : best), allData[0]);
+    // Fix 4: only look at data points in the future (today onwards)
+    const futureData = allData.filter(d => d.month >= monthsToToday);
+    if (futureData.length === 0) return { type: "short" as const };
+
+    const peakPt = futureData.reduce((best, d) => (d.agioDesagio > best.agioDesagio ? d : best), futureData[0]);
     if (peakPt.agioDesagio < 1.0) return { type: "no_agio" as const };
 
-    const m = peakPt.month;
-    const yrs = Math.floor(m / 12);
-    const mos = m % 12;
-    const timeStr = yrs > 0
-      ? `${yrs} ano${yrs > 1 ? "s" : ""}${mos > 0 ? ` e ${mos} meses` : ""}`
-      : `${mos} meses`;
+    const m = peakPt.month; // months since purchase
+    const fromNow = m - monthsToToday; // months from today
+    const fYrs = Math.floor(fromNow / 12);
+    const fMos = fromNow % 12;
+    const timeStr = fromNow === 0
+      ? "hoje"
+      : fYrs > 0
+        ? `${fYrs} ano${fYrs > 1 ? "s" : ""}${fMos > 0 ? ` e ${fMos} meses` : ""} a partir de hoje`
+        : `${fMos} meses a partir de hoje`;
+
     // Approximate remaining duration at peak
     const purchaseDecimal = sec.purchaseYear + sec.purchaseMonth / 12;
     const peakDecimal = purchaseDecimal + m / 12;
@@ -698,7 +709,7 @@ const SecurityCard: React.FC<{
       sensitPerPP,
       nearHorizonEdge: m >= allData.length - 3,
     };
-  }, [allData, sec]);
+  }, [allData, sec, monthsToToday]);
 
   const sellDateLabel = sellAnalysis.type === "sell" ? sellAnalysis.date : "";
   const sellVisible = sellAnalysis.type === "sell" &&
@@ -711,6 +722,13 @@ const SecurityCard: React.FC<{
   const breakEvenVisible = chartData.length > 0 &&
     sec.breakEvenMonth >= chartData[0].month &&
     sec.breakEvenMonth <= chartData[chartData.length - 1].month;
+
+  // "Hoje" marker — where May/2026 falls in the chart
+  const todayDate = allData[monthsToToday]?.date ?? "";
+  const todayVisible = monthsToToday > 0 &&
+    chartData.length > 0 &&
+    monthsToToday >= chartData[0].month &&
+    monthsToToday <= chartData[chartData.length - 1].month;
 
   const tickInterval = Math.max(0, Math.floor(chartData.length / 10) - 1);
 
@@ -843,6 +861,12 @@ const SecurityCard: React.FC<{
             <YAxis yAxisId="right" orientation="right" domain={[yRightMin, yRightMax]} tickFormatter={(v: number) => `${v}%`} tick={{ fill: "#9CA3AF", fontSize: 11 }} tickLine={{ stroke: "#4B5563" }} axisLine={{ stroke: "#4B5563" }} width={60} />
             <Tooltip content={<CustomTooltip />} />
 
+            {/* Hoje */}
+            {todayVisible && (
+              <ReferenceLine x={todayDate} yAxisId="left" stroke="#34D399" strokeDasharray="4 3" strokeWidth={1.5}
+                label={{ value: "Hoje", position: "insideTopLeft", fill: "#34D399", fontSize: 10, fontWeight: 700, offset: 6 }}
+              />
+            )}
             {/* Break-even */}
             {breakEvenVisible && (
               <ReferenceLine x={breakEvenDate} yAxisId="left" stroke="#3B82F6" strokeDasharray="5 4" strokeWidth={1.5}
@@ -907,7 +931,7 @@ const SecurityCard: React.FC<{
               return (
                 <>
                   <span className="text-amber-300 font-semibold">Ponto ótimo estimado: {s.date}</span>
-                  {" "}({s.timeStr} após a compra). Nessa data o yield de mercado simulado atinge{" "}
+                  {" "}({s.timeStr}). Nessa data o yield de mercado simulado atinge{" "}
                   <span className="text-purple-300 font-semibold">{s.yieldAtPeak.toFixed(2)}% a.a.</span>
                   {" "}(mínimo do ciclo), gerando{" "}
                   <span className="text-blue-300 font-semibold">Ágio de {s.agio.toFixed(1)}%</span>
