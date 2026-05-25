@@ -100,13 +100,23 @@ function getIRRate(months: number): number {
 
 function getCyclePhaseOffset(scenario: CycleScenario): number {
   switch (scenario) {
-    case "pico":       return 0;
-    case "vale":       return Math.PI;
-    case "neutro":     return Math.PI / 2;
-    case "alta_queda": return Math.PI;
-    case "queda_alta": return 0;
+    case "pico":       return 0;            // at peak → rates fall immediately
+    case "vale":       return Math.PI;      // at valley → rates rise immediately
+    case "neutro":     return Math.PI / 2;  // at midpoint → mild oscillation
+    case "alta_queda": return 3 * Math.PI / 2; // rising first (peak at T/4), then falls BELOW yieldInitial at 3T/4
+    case "queda_alta": return 0;            // same direction as pico — falling from purchase yield
   }
 }
+
+// ─── Convergência estrutural de taxas ────────────────────────────────────────
+// Taxas de equilíbrio de longo prazo por indexador (quando o ciclo normalizar)
+// IPCA+: IPCA 4,5% + r* 5% + prêmio de risco 1% = ~10,5%
+// Prefixado: Selic neutra 8,5-9% + prêmio de prazo 0,5-1% = ~9,5%
+const LONG_RUN_YIELD: Partial<Record<Indexer, number>> = {
+  "IPCA+":     10.5,
+  "Prefixado":  9.5,
+};
+const STRUCT_DECAY = 0.18; // ~18% a.a. → ~59% de convergência em 5 anos
 
 function generateData(horizonYears: number, sec: Security): DataPoint[] {
   const CDI_RATE = 0.1375;
@@ -131,15 +141,23 @@ function generateData(horizonYears: number, sec: Security): DataPoint[] {
     const t = i / 12;
     const cyclePhase = (2 * Math.PI * t) / sec.cyclePeriodYears + phaseOffset;
 
+    // Structural decline: yield center converges toward long-run neutral rate over time
+    // (e.g. IPCA+ falls from 13.5% → 10.5% as Brazil normalizes rates structurally)
+    const longRun = LONG_RUN_YIELD[sec.indexer];
+    const yieldCenter = longRun !== undefined && longRun < sec.yieldInitial
+      ? sec.yieldInitial + (longRun - sec.yieldInitial) * (1 - Math.exp(-STRUCT_DECAY * t))
+      : sec.yieldInitial;
+
     // Fix 1: yield starts exactly at yieldInitial at t=0 by subtracting the initial offset
-    const yieldMercado = sec.yieldInitial +
+    // The cycle oscillates around the (declining) yieldCenter
+    const yieldMercado = yieldCenter +
       (sec.cycleAmplitude / 2) * (Math.cos(cyclePhase) - Math.cos(phaseOffset));
 
     // Fix 2: remaining years from purchase date, not hardcoded 2026
     const remainingYears = Math.max(0.1, sec.maturityYear - sec.purchaseYear - sec.purchaseMonth / 12 - t);
-    const yieldDelta = yieldMercado - sec.yieldInitial;
+    const yieldDelta = yieldMercado - sec.yieldInitial; // vs purchase yield (ágio reference)
     const agioDesagio = parseFloat(
-      Math.min(40, Math.max(-60, -yieldDelta * remainingYears * 0.65)).toFixed(2)
+      Math.min(70, Math.max(-60, -yieldDelta * remainingYears * 0.65)).toFixed(2)
     );
 
     const cdiAcumulado = (Math.pow(1 + CDI_RATE, t) - 1) * 100;
@@ -190,13 +208,19 @@ const SELIC_HIST: number[] = [
   14.50, 14.25, 14.00, 13.75, 13.75,
 ]; // 41 valores (idx 0..40)
 
+// Projeção estrutural: reforma fiscal + ancoragem de expectativas permitem convergência
+// à taxa neutra histórica de economias emergentes bem geridas (~7-8% nominal)
 const SELIC_PROJ: number[] = [
-  // Jun–Dez 2026
-  13.50, 13.25, 13.00, 12.75, 12.50, 12.25, 12.00,
-  // 2027: cortes graduais → vale estrutural
-  11.75, 11.50, 11.25, 11.00, 10.75, 10.75, 10.50, 10.50, 10.50, 10.50, 10.50, 10.50,
-  // 2028–2030: estabilidade em 10,50%
-  ...Array(12 * 3).fill(10.50),
+  // Jun–Dez 2026: cortes acelerados pelo espaço desinflacionário
+  13.50, 13.25, 13.00, 12.50, 12.00, 11.50, 11.00,
+  // 2027: convergência rápida à taxa neutra de curto prazo
+  10.50, 10.00,  9.50,  9.00,  8.75,  8.50,  8.25,  8.25,  8.00,  8.00,  8.00,  8.00,
+  // 2028: consolidação na taxa neutra estrutural (~7,5%)
+   7.75,  7.75,  7.50,  7.50,  7.50,  7.50,  7.50,  7.50,  7.50,  7.50,  7.50,  7.50,
+  // 2029: leve ajuste fino
+   7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,  7.25,
+  // 2030: equilíbrio estrutural ~7%
+   7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,  7.00,
 ]; // 55 valores (idx 41..95)
 
 // Hoje = índice 40 (Maio/2026)
@@ -227,7 +251,13 @@ function buildCycleChartData(sec: Security): CycleChartPoint[] {
     if (idx >= purchaseIdx) {
       const t = (idx - purchaseIdx) / 12;
       const phase = (2 * Math.PI * t) / sec.cyclePeriodYears + phaseOffset;
-      yieldSec = parseFloat((sec.yieldInitial + (sec.cycleAmplitude / 2) * Math.cos(phase)).toFixed(2));
+      // Structural decline: same formula as generateData for consistency
+      const longRun = LONG_RUN_YIELD[sec.indexer];
+      const yieldCenter = longRun !== undefined && longRun < sec.yieldInitial
+        ? sec.yieldInitial + (longRun - sec.yieldInitial) * (1 - Math.exp(-STRUCT_DECAY * t))
+        : sec.yieldInitial;
+      // Fix 1 anchoring: subtract cos(phaseOffset) so yield = yieldInitial at t=0
+      yieldSec = parseFloat((yieldCenter + (sec.cycleAmplitude / 2) * (Math.cos(phase) - Math.cos(phaseOffset))).toFixed(2));
     }
 
     return { label, idx, selic, selicProj, yieldSec };
@@ -289,7 +319,7 @@ const CycleChartModal: React.FC<{ sec: Security; onClose: () => void }> = ({ sec
                 interval={5}
               />
               <YAxis
-                domain={[8, 17]}
+                domain={[5, 18]}
                 tickFormatter={(v: number) => `${v}%`}
                 tick={{ fill: "#9CA3AF", fontSize: 10 }}
                 tickLine={{ stroke: "#4B5563" }}
@@ -346,11 +376,11 @@ const CycleChartModal: React.FC<{ sec: Security; onClose: () => void }> = ({ sec
         <div className="px-6 py-4 border-t border-gray-800 space-y-1">
           <p className="text-[11px] text-gray-400 leading-relaxed">
             <span className="text-blue-300 font-semibold">Selic histórico</span> (BACEN, jan/2023–mai/2026) ·{" "}
-            <span className="text-blue-200 font-semibold">Projeção</span> (modelo simplificado — queda gradual para taxa neutra ~10,5%) ·{" "}
-            <span className="text-green-400 font-semibold">Yield simulado</span> (ciclo configurado: {CYCLE_LABELS[sec.cycleScenario]}, ±{(sec.cycleAmplitude / 2).toFixed(2)} pp, {sec.cyclePeriodYears} anos).
+            <span className="text-blue-200 font-semibold">Projeção</span> (cenário estrutural — convergência à taxa neutra ~7,0% com reforma fiscal) ·{" "}
+            <span className="text-green-400 font-semibold">Yield simulado</span> (ciclo: {CYCLE_LABELS[sec.cycleScenario]}, ±{(sec.cycleAmplitude / 2).toFixed(2)} pp, {sec.cyclePeriodYears} anos + queda estrutural).
           </p>
           <p className="text-[11px] text-gray-500">
-            Pico da Selic: jul–set/2025 em 15,25% · Vale: mai–ago/2024 em 10,50% · Taxa neutra projetada: 10,50% a.a.
+            Pico da Selic: jul–set/2025 em 15,25% · Vale: mai–ago/2024 em 10,50% · Taxa neutra estrutural estimada: 7,0–7,5% a.a. (além das projeções oficiais)
           </p>
         </div>
       </div>
@@ -957,7 +987,7 @@ const SecurityCard: React.FC<{
         )}
         <p className="text-[11px] text-gray-500 leading-relaxed">
           * Ret. Líquido considera {isExempt ? "isenção de IR (PF)" : "IR regressivo (22,5% → 15%)"}.
-          Ágio/Deságio estimado por duração simplificada (±{sec.cycleAmplitude / 2} pp · ciclo {sec.cyclePeriodYears} anos).
+          Ágio/Deságio = duration simplificada (±{sec.cycleAmplitude / 2} pp · ciclo {sec.cyclePeriodYears} anos + queda estrutural IPCA+→10,5% / Prefixado→9,5%).
           CDI base: Selic 13,75% a.a. · IPCA base: 4,5% a.a.
         </p>
       </div>
@@ -1103,7 +1133,9 @@ const DEFAULT_SECURITIES: Security[] = [
     id: "13", shortLabel: "CRA SLC",
     name: "CRA SLC AGRÍCOLA IPCA+ 6,74% – venc. 2031",
     type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 6.74,
-    yieldInitial: 11.24, cycleScenario: "vale", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    // Comprado no vale do ciclo (jul/2024, Selic 10,5%) → taxa subiu → agora em queda
+    // cycleScenario "alta_queda" (phaseOffset 3π/2): sobe até pico (T/4≈1 ano), cai até vale (3T/4≈3 anos)
+    yieldInitial: 11.24, cycleScenario: "alta_queda", cycleAmplitude: 4.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2031, breakEvenMonth: 22,
     purchaseYear: 2024, purchaseMonth: 6,
   },
@@ -1111,7 +1143,8 @@ const DEFAULT_SECURITIES: Security[] = [
     id: "14", shortLabel: "CDCA BTG",
     name: "CDCA BTG PACTUAL PRE 12,03% – venc. 2034",
     type: "CDCA", creditType: "Privado", indexer: "Prefixado", spread: 12.03,
-    yieldInitial: 12.03, cycleScenario: "vale", cycleAmplitude: 2.5, cyclePeriodYears: 4,
+    // Comprado no vale (ago/2024) → subiu com Selic → agora iniciando queda estrutural
+    yieldInitial: 12.03, cycleScenario: "alta_queda", cycleAmplitude: 4.0, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2034, breakEvenMonth: 24,
     purchaseYear: 2024, purchaseMonth: 7,
   },
