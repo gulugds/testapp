@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
-import { Plus, X, TrendingUp, ChevronRight, Info, SlidersHorizontal, ArrowUp } from "lucide-react";
+import { Plus, X, TrendingUp, ChevronRight, Info, SlidersHorizontal, ArrowUp, BarChart2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -168,6 +168,196 @@ function generateData(horizonYears: number, sec: Security): DataPoint[] {
     };
   });
 }
+
+// ─── Selic histórica + projeção ───────────────────────────────────────────────
+//
+// Índice 0 = Janeiro 2023
+// Índice 40 = Maio 2026 (hoje – último ponto histórico)
+// Índice 41–95 = Junho 2026 – Dezembro 2030 (projeção)
+//
+// Fontes: BACEN (histórico) / modelo próprio (projeção)
+
+const SELIC_HIST: number[] = [
+  // 2023: Jan–Jul (hold 13,75%), Ago–Dez (cortes)
+  13.75, 13.75, 13.75, 13.75, 13.75, 13.75, 13.75,
+  13.25, 12.75, 12.25, 11.75, 11.75,
+  // 2024: Jan–Ago (cortes → vale 10,50%), Set–Dez (alta)
+  11.25, 11.25, 10.75, 10.75, 10.50, 10.50, 10.50, 10.50,
+  10.75, 11.25, 11.75, 12.25,
+  // 2025: Jan–Set (alta → pico 15,25%), Out–Dez (recuo)
+  13.25, 13.25, 13.75, 14.25, 14.75, 15.00, 15.25, 15.25, 15.25,
+  15.00, 14.75, 14.75,
+  // 2026: Jan–Mai (cortes → 13,75%)
+  14.50, 14.25, 14.00, 13.75, 13.75,
+]; // 41 valores (idx 0..40)
+
+const SELIC_PROJ: number[] = [
+  // Jun–Dez 2026
+  13.50, 13.25, 13.00, 12.75, 12.50, 12.25, 12.00,
+  // 2027: cortes graduais → vale estrutural
+  11.75, 11.50, 11.25, 11.00, 10.75, 10.75, 10.50, 10.50, 10.50, 10.50, 10.50, 10.50,
+  // 2028–2030: estabilidade em 10,50%
+  ...Array(12 * 3).fill(10.50),
+]; // 55 valores (idx 41..95)
+
+// Hoje = índice 40 (Maio/2026)
+const TODAY_IDX = 40;
+
+interface CycleChartPoint {
+  label: string;
+  idx: number;
+  selic: number | null;
+  selicProj: number | null;
+  yieldSec: number | null;
+}
+
+function buildCycleChartData(sec: Security): CycleChartPoint[] {
+  const purchaseIdx = (sec.purchaseYear - 2023) * 12 + sec.purchaseMonth;
+  const phaseOffset = getCyclePhaseOffset(sec.cycleScenario);
+
+  return Array.from({ length: 96 }, (_, idx) => {
+    const date = new Date(2023, idx, 1); // JS handles month overflow
+    const label = date.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
+
+    const selic     = idx <= TODAY_IDX ? SELIC_HIST[idx] : null;
+    const selicProj = idx >= TODAY_IDX
+      ? (idx === TODAY_IDX ? SELIC_HIST[TODAY_IDX] : SELIC_PROJ[idx - TODAY_IDX - 1])
+      : null;
+
+    let yieldSec: number | null = null;
+    if (idx >= purchaseIdx) {
+      const t = (idx - purchaseIdx) / 12;
+      const phase = (2 * Math.PI * t) / sec.cyclePeriodYears + phaseOffset;
+      yieldSec = parseFloat((sec.yieldInitial + (sec.cycleAmplitude / 2) * Math.cos(phase)).toFixed(2));
+    }
+
+    return { label, idx, selic, selicProj, yieldSec };
+  });
+}
+
+// ─── Cycle Chart Modal ────────────────────────────────────────────────────────
+
+const CYCLE_CONTEXT: Record<CycleScenario, string> = {
+  pico:       "Taxa estava no pico — simulação começa em queda de juros.",
+  vale:       "Taxa estava no vale — simulação começa em alta de juros.",
+  neutro:     "Taxa estável — pequenas oscilações sem tendência definida.",
+  alta_queda: "Taxa ainda subia na compra — sobe mais antes de cair.",
+  queda_alta: "Taxa ainda caía na compra — cai mais antes de subir.",
+};
+
+const CycleChartModal: React.FC<{ sec: Security; onClose: () => void }> = ({ sec, onClose }) => {
+  const data = useMemo(() => buildCycleChartData(sec), [sec]);
+
+  const purchaseIdx = (sec.purchaseYear - 2023) * 12 + sec.purchaseMonth;
+  const purchaseLabel = data[Math.max(0, purchaseIdx)]?.label ?? "";
+  const todayLabel    = data[TODAY_IDX].label;
+
+  // Show X tick every 6 months
+  const tickData = data.filter((_, i) => i % 6 === 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-800">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <BarChart2 size={16} className="text-blue-400" />
+              Gráfico do Ciclo de Juros
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">{sec.name}</p>
+            <p className="text-xs text-blue-300 mt-0.5 font-semibold">
+              {CYCLE_LABELS[sec.cycleScenario]} — {CYCLE_CONTEXT[sec.cycleScenario]}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors mt-0.5">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Chart */}
+        <div className="px-2 pt-4 pb-2">
+          <ResponsiveContainer width="100%" height={380}>
+            <LineChart data={data} margin={{ top: 16, right: 48, left: 4, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.4} />
+
+              <XAxis
+                dataKey="label"
+                tick={{ fill: "#9CA3AF", fontSize: 10 }}
+                tickLine={{ stroke: "#4B5563" }}
+                axisLine={{ stroke: "#4B5563" }}
+                interval={5}
+              />
+              <YAxis
+                domain={[8, 17]}
+                tickFormatter={(v: number) => `${v}%`}
+                tick={{ fill: "#9CA3AF", fontSize: 10 }}
+                tickLine={{ stroke: "#4B5563" }}
+                axisLine={{ stroke: "#4B5563" }}
+                width={46}
+              />
+
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-xs shadow-xl min-w-[180px]">
+                      <p className="text-gray-400 mb-1.5 font-semibold border-b border-gray-700 pb-1">{label}</p>
+                      {payload.filter((e) => e.value !== null).map((e) => (
+                        <div key={e.dataKey as string} className="flex justify-between gap-3 py-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-5 h-0" style={{ border: `2px ${(e.strokeDasharray as string) ? "dashed" : "solid"} ${e.color}` }} />
+                            <span className="text-gray-300">{e.name}</span>
+                          </div>
+                          <span style={{ color: e.color as string }} className="font-bold">{(e.value as number).toFixed(2)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }}
+              />
+
+              <Legend
+                verticalAlign="top"
+                wrapperStyle={{ paddingBottom: "12px", fontSize: "11px", color: "#D1D5DB" }}
+              />
+
+              {/* Today reference */}
+              <ReferenceLine x={todayLabel} stroke="#FFFFFF" strokeDasharray="4 3" strokeWidth={1}
+                label={{ value: "Hoje", position: "insideTopLeft", fill: "#FFFFFF", fontSize: 9, fontWeight: 700 }}
+              />
+
+              {/* Purchase date reference */}
+              {purchaseIdx >= 0 && purchaseIdx < 96 && (
+                <ReferenceLine x={purchaseLabel} stroke="#F97316" strokeDasharray="4 3" strokeWidth={1.5}
+                  label={{ value: "Compra", position: "insideTopRight", fill: "#F97316", fontSize: 9, fontWeight: 700 }}
+                />
+              )}
+
+              {/* Lines */}
+              <Line dataKey="selic"     name="Selic (histórico)"  stroke="#60A5FA" strokeWidth={2.5} dot={false} connectNulls={false} activeDot={{ r: 4 }} />
+              <Line dataKey="selicProj" name="Selic (projeção)"   stroke="#93C5FD" strokeWidth={2}   dot={false} connectNulls={false} strokeDasharray="6 3" activeDot={{ r: 4 }} />
+              <Line dataKey="yieldSec"  name="Yield simulado"     stroke="#22C55E" strokeWidth={2}   dot={false} connectNulls={false} activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Explanation */}
+        <div className="px-6 py-4 border-t border-gray-800 space-y-1">
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            <span className="text-blue-300 font-semibold">Selic histórico</span> (BACEN, jan/2023–mai/2026) ·{" "}
+            <span className="text-blue-200 font-semibold">Projeção</span> (modelo simplificado — queda gradual para taxa neutra ~10,5%) ·{" "}
+            <span className="text-green-400 font-semibold">Yield simulado</span> (ciclo configurado: {CYCLE_LABELS[sec.cycleScenario]}, ±{(sec.cycleAmplitude / 2).toFixed(2)} pp, {sec.cyclePeriodYears} anos).
+          </p>
+          <p className="text-[11px] text-gray-500">
+            Pico da Selic: jul–set/2025 em 15,25% · Vale: mai–ago/2024 em 10,50% · Taxa neutra projetada: 10,50% a.a.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────────
 
@@ -442,6 +632,7 @@ const SecurityCard: React.FC<{
   onZoomChange: (v: boolean) => void;
   onRemove: () => void;
 }> = ({ security: sec, horizon, zoomBreakEven, onHorizonChange, onZoomChange, onRemove }) => {
+  const [showCycleChart, setShowCycleChart] = useState(false);
   const horizonYears = parseInt(horizon, 10);
   const allData = useMemo(() => generateData(horizonYears, sec), [horizonYears, sec]);
 
@@ -494,13 +685,20 @@ const SecurityCard: React.FC<{
               {" "}· Venc.{" "}
               <span className="text-gray-200 font-semibold">{sec.maturityYear}</span>
             </p>
-            <p className="text-sm text-gray-400">
-              Ciclo:{" "}
-              <span className="text-gray-200 font-semibold">{CYCLE_LABELS[sec.cycleScenario]}</span>
-              {" "}· Amplitude{" "}
-              <span className="text-purple-400 font-semibold">±{(sec.cycleAmplitude / 2).toFixed(2)} pp</span>
-              {" "}· Período{" "}
-              <span className="text-purple-400 font-semibold">{sec.cyclePeriodYears} anos</span>
+            <p className="text-sm text-gray-400 flex items-center gap-2 flex-wrap">
+              <span>Ciclo:</span>
+              <button
+                onClick={() => setShowCycleChart(true)}
+                className="text-gray-200 font-semibold hover:text-blue-400 transition-colors underline decoration-dotted underline-offset-2 inline-flex items-center gap-1"
+                title="Ver gráfico do ciclo de juros"
+              >
+                {CYCLE_LABELS[sec.cycleScenario]}
+                <BarChart2 size={12} className="text-blue-500 shrink-0" />
+              </button>
+              <span>·</span>
+              <span>Amplitude <span className="text-purple-400 font-semibold">±{(sec.cycleAmplitude / 2).toFixed(2)} pp</span></span>
+              <span>·</span>
+              <span>Período <span className="text-purple-400 font-semibold">{sec.cyclePeriodYears} anos</span></span>
             </p>
             <p className="text-sm font-semibold text-blue-400 mt-1">
               Break-even MtM: Mês {sec.breakEvenMonth} (≈ Dia {sec.breakEvenMonth * 30})
@@ -554,6 +752,10 @@ const SecurityCard: React.FC<{
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      {showCycleChart && (
+        <CycleChartModal sec={sec} onClose={() => setShowCycleChart(false)} />
+      )}
 
       {/* Footer */}
       <div className="px-6 py-3 space-y-2">
@@ -679,7 +881,7 @@ const DEFAULT_SECURITIES: Security[] = [
     id: "1",  shortLabel: "CRA Seara",
     name: "CRA SEARA IPCA+ 7,42% – venc. 2055",
     type: "CRA", creditType: "Privado", indexer: "IPCA+", spread: 7.42,
-    yieldInitial: 13.5, cycleScenario: "pico", cycleAmplitude: 3.5, cyclePeriodYears: 4,
+    yieldInitial: 13.5, cycleScenario: "alta_queda", cycleAmplitude: 3.5, cyclePeriodYears: 4,
     irTreatment: "Isento", maturityYear: 2055, breakEvenMonth: 32,
     purchaseYear: 2025, purchaseMonth: 1,
   },
